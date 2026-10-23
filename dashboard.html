@@ -1,0 +1,192 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TrustVault Dashboard</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #101714;
+      color: #e5f5ec;
+    }
+    header {
+      padding: 22px 30px;
+      background: #18241e;
+      border-bottom: 1px solid #294335;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+    }
+    h1 { margin: 0; color: #34d399; font-size: 24px; }
+    main { max-width: 1000px; margin: 35px auto; padding: 0 20px; }
+    .welcome, .panel {
+      background: #18241e;
+      padding: 24px;
+      border: 1px solid #294335;
+      border-radius: 14px;
+      margin-bottom: 20px;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: #202f26;
+      border: 1px solid #345543;
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .card h3 { color: #6ee7b7; margin-top: 0; }
+    p { color: #c2d5c9; line-height: 1.6; overflow-wrap: anywhere; }
+    button {
+      background: #059669;
+      color: white;
+      border: 0;
+      border-radius: 8px;
+      padding: 11px 16px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:hover { background: #047857; }
+    #status { color: #fbbf24; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>✦ TrustVault</h1>
+    <button id="logoutButton">Sign Out</button>
+  </header>
+
+  <main>
+    <section class="welcome">
+      <h2>Welcome to TrustVault</h2>
+      <p id="account">Checking your account...</p>
+      <p id="status">Loading account details...</p>
+    </section>
+
+    <section class="cards">
+      <div class="card">
+        <h3>My Documents</h3>
+        <p>View documents you own or have permission to access.</p>
+      </div>
+<div class="card">
+  <h3>Upload Documents</h3>
+  <p>Upload a document securely to TrustVault.</p>
+
+  <form id="uploadForm">
+    <label for="document">Choose a document</label>
+    <input
+      id="document"
+      name="document"
+      type="file"
+      accept=".pdf,.png,.jpg,.jpeg,.txt"
+      required
+    >
+
+    <p><small>PDF, PNG, JPG or TXT. Maximum size: 10 MB.</small></p>
+
+    <button type="submit">Upload Document</button>
+    <p id="uploadStatus" role="status"></p>
+  </form>
+</div>
+      
+<div class="card">
+        <h3>Sharing & Permissions</h3>
+        <p>Document access controls will be added and tested next.</p>
+      </div>
+      <div class="card">
+        <h3>Activity Logs</h3>
+        <p>Audit history will be connected after the document permissions.</p>
+      </div>
+    </section>
+  </main>
+<script>
+  async function loadAccount() {
+    const account = document.getElementById("account");
+    const status = document.getElementById("status");
+
+    try {
+      const response = await fetch("/api/me", {
+        credentials: "same-origin"
+      });
+
+      if (!response.ok) {
+        window.location.href = "/";
+        return;
+      }
+
+      const data = await response.json();
+
+      account.textContent = "Signed in as: " + data.email;
+      status.textContent = "Dashboard loaded successfully.";
+    } catch (error) {
+      status.textContent = "Could not load account details. Please refresh.";
+    }
+  }
+
+  document.getElementById("logoutButton").addEventListener("click", async () => {
+    const status = document.getElementById("status");
+
+    try {
+      const response = await fetch("/api/logout", {
+        method: "POST",
+        credentials: "same-origin"
+      });
+
+      if (response.ok) {
+        window.location.href = "/";
+      } else {
+        status.textContent = "Logout failed. Please try again.";
+      }
+    } catch {
+      status.textContent = "Could not connect to the server.";
+    }
+  });
+
+  document.getElementById("uploadForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const fileInput = document.getElementById("document");
+    const status = document.getElementById("uploadStatus");
+    const file = fileInput.files[0];
+
+    if (!file) {
+      status.textContent = "Please choose a document first.";
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("document", file);
+    status.textContent = "Uploading document...";
+
+    try {
+      const response = await fetch("/api/documents/upload", {
+        method: "POST",
+        credentials: "same-origin",
+        body: formData
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Upload failed.");
+      }
+
+      status.textContent = "Uploaded successfully: " + data.document.name;
+      document.getElementById("uploadForm").reset();
+    } catch (error) {
+      status.textContent = error.message || "Could not upload document.";
+    }
+  });
+
+  loadAccount();
+</script>
+
+</body>
+</html>

@@ -74,7 +74,7 @@ a { color: #4f46e5; text-decoration: none; }
 
     <label for="password">Password</label>
     <div class="password-row">
-      <input id="password" type="password" placeholder="Enter your password" required minlength="6" autocomplete="current-password">
+     <input id="password" type="password" placeholder="Enter your password" required minlength="12" maxlength="72" autocomplete="current-password">
       <button type="button" id="togglePassword">Show</button>
     </div>
 
@@ -89,28 +89,83 @@ a { color: #4f46e5; text-decoration: none; }
 
   <p class="signup">New here? <a href="#" id="signup">Create an account</a></p>
 </main>
+
 <script>
 const password = document.getElementById("password");
+const message = document.getElementById("message");
+const form = document.getElementById("loginForm");
+const submitButton = document.querySelector(".login-btn");
+const signupLink = document.getElementById("signup");
+
 document.getElementById("togglePassword").addEventListener("click", function () {
   const showing = password.type === "text";
   password.type = showing ? "password" : "text";
   this.textContent = showing ? "Show" : "Hide";
 });
 
-document.getElementById("loginForm").addEventListener("submit", function (event) {
+signupLink.addEventListener("click", function (event) {
   event.preventDefault();
-  document.getElementById("message").style.color = "#b91c1c";
-  document.getElementById("message").textContent =
-    "Demo only: connect a secure backend to sign in.";
+
+  const isSignup = submitButton.dataset.mode === "signup";
+
+  if (!isSignup) {
+    submitButton.dataset.mode = "signup";
+    document.querySelector("h1").textContent = "Create Account";
+    document.querySelector(".subtitle").textContent = "Join TrustVault today";
+    submitButton.textContent = "Create Account";
+    signupLink.textContent = "Already registered? Sign in";
+    password.autocomplete = "new-password";
+    password.minLength = 12;
+    message.textContent = "Choose a password with at least 12 characters.";
+  } else {
+    submitButton.dataset.mode = "login";
+    document.querySelector("h1").textContent = "TrustVault";
+    document.querySelector(".subtitle").textContent = "Please sign in to your account";
+    submitButton.textContent = "Sign In";
+    signupLink.textContent = "Create an account";
+    password.autocomplete = "current-password";
+    password.minLength = 12;
+    message.textContent = "";
+  }
+});
+
+form.addEventListener("submit", async function (event) {
+  event.preventDefault();
+
+  const isSignup = submitButton.dataset.mode === "signup";
+  message.style.color = "#b91c1c";
+  message.textContent = isSignup ? "Creating account..." : "Signing in...";
+
+  try {
+    const response = await fetch(isSignup ? "/api/signup" : "/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        email: document.getElementById("email").value.trim(),
+        password: password.value
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message || "Request failed.");
+    }
+message.style.color = "#15803d";
+message.textContent = data.message ||
+  (isSignup ? "Account created successfully!" : "Signed in successfully!");
+
+window.location.href = "/dashboard";
+      } catch (error) {
+    message.style.color = "#b91c1c";
+    message.textContent = error.message || "Could not connect to the server.";
+  }
 });
 
 document.getElementById("forgot").addEventListener("click", function (event) {
   event.preventDefault();
-  alert("Password recovery will be available after backend setup.");
-});
-document.getElementById("signup").addEventListener("click", function (event) {
-  event.preventDefault();
-  alert("Account creation will be added in a later step.");
+  message.textContent = "Password recovery is not set up yet.";
 });
 </script>
 </body>
