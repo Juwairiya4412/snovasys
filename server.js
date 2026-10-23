@@ -265,6 +265,457 @@ app.post(
   }
 );
 
+// List documents the current user is allowed to see.
+app.get(
+  "/api/documents",
+  requireRole("admin", "owner", "viewer"),
+  (req, res) => {
+    try {
+      let documents;
+
+      if (req.currentUser.role === "admin") {
+        documents = db.prepare(`
+          SELECT
+            d.id,
+            d.original_name AS name,
+            d.mime_type,
+            d.size_bytes,
+            d.created_at,
+            u.email AS owner_email,
+            'admin' AS access_level
+          FROM documents d
+          JOIN users u ON u.id = d.owner_id
+          ORDER BY d.created_at DESC
+        `).all();
+      } else {
+        documents = db.prepare(`
+          SELECT
+            d.id,
+            d.original_name AS name,
+            d.mime_type,
+            d.size_bytes,
+            d.created_at,
+            u.email AS owner_email,
+            CASE
+              WHEN d.owner_id = ? THEN 'owner'
+              ELSE s.access_level
+            END AS access_level
+          FROM documents d
+          JOIN users u ON u.id = d.owner_id
+          LEFT JOIN document_shares s
+            ON s.document_id = d.id
+           AND s.user_id = ?
+          WHERE d.owner_id = ?
+             OR s.user_id = ?
+          ORDER BY d.created_at DESC
+        `).all(
+          req.currentUser.id,
+          req.currentUser.id,
+          req.currentUser.id,
+          req.currentUser.id
+        );
+      }
+
+      res.json({ documents });
+    } catch (error) {
+      console.error("Could not list documents:", error);
+      res.status(500).json({
+        message: "Could not load documents."
+      });
+    }
+  }
+);
+// Download a document only if the current user has permission.
+app.get(
+  "/api/documents/:id/download",
+  requireRole("admin", "owner", "viewer"),
+  (req, res) => {
+    try {
+      const documentId = Number(req.params.id);
+
+      if (!Number.isSafeInteger(documentId) || documentId < 1) {
+        return res.status(400).json({
+          message: "Invalid document ID."
+        });
+      }
+
+      const document = db.prepare(`
+        SELECT id, owner_id, original_name, stored_name
+        FROM documents
+        WHERE id = ?
+      `).get(documentId);
+
+      if (!document) {
+        return res.status(404).json({
+          message: "Document not found."
+        });
+      }
+
+      const isAdmin = req.currentUser.role === "admin";
+      const isOwner = document.owner_id === req.currentUser.id;
+
+      const share = db.prepare(`
+        SELECT access_level
+        FROM document_shares
+        WHERE document_id = ? AND user_id = ?
+      `).get(documentId, req.currentUser.id);
+
+      if (!isAdmin && !isOwner && !share) {
+        return res.status(403).json({
+          message: "You do not have permission to download this document."
+        });
+      }
+
+      // Prevent stored filenames from escaping the private folder.
+      const safeName = path.basename(document.stored_name);
+
+      if (safeName !== document.stored_name) {
+        return res.status(400).json({
+          message: "Invalid stored filename."
+        });
+      }
+
+      const filePath = path.join(uploadDir, safeName);
+
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({
+          message: "The stored document file is missing."
+        });
+      }
+
+      db.prepare(`
+        INSERT INTO audit_logs
+          (actor_user_id, action, document_id, details)
+        VALUES (?, ?, ?, ?)
+      `).run(
+        req.currentUser.id,
+        "document_download",
+        document.id,
+        "Downloaded a document"
+      );
+
+      return res.download(filePath, document.original_name, (error) => {
+        if (error) {
+          console.error("Document download failed:", error.message);
+        }
+      });
+    } catch (error) {
+      console.error("Document download error:", error);
+
+      if (!res.headersSent) {
+        res.status(500).json({
+          message: "Could not download the document."
+        });
+      }
+    }
+  }
+);
+
+/* Share a document with another registered user. */
+app.post(
+  "/api/documents/:id/shares",
+  requireRole("admin", "owner"),
+  (req, res) => {
+    try {
+      const documentId = Number(req.params.id);
+      const email = String(req.body.email || "").trim().toLowerCase();
+      const accessLevel = String(req.body.accessLevel || "");
+
+      if (!Number.isSafeInteger(documentId) || documentId < 1) {
+        return res.status(400).json({ message: "Invalid document ID." });
+      }
+
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(400).json({ message: "Enter a valid recipient email." });
+      }
+
+      if (!["read", "edit"].includes(accessLevel)) {
+        return res.status(400).json({
+          message: "Access level must be read or edit."
+        });
+      }
+
+      const document = db.prepare(
+        "SELECT id, owner_id FROM documents WHERE id = ?"
+      ).get(documentId);
+
+      if (!document) {
+        return res.status(404).json({ message: "Document not found." });
+      }
+
+      if (
+        req.currentUser.role !== "admin" &&
+        document.owner_id !== req.currentUser.id
+      ) {
+        return res.status(403).json({
+          message: "Only the document owner or an admin can share this document."
+        });
+      }
+
+      const recipient = db.prepare(
+        "SELECT id, email FROM users WHERE email = ?"
+      ).get(email);
+
+      if (!recipient) {
+        return res.status(404).json({
+          message: "No registered user has that email address."
+        });
+      }
+
+      if (recipient.id === document.owner_id) {
+        return res.status(400).json({
+          message: "The document owner already has access."
+        });
+      }
+
+      db.transaction(() => {
+        db.prepare(`
+          INSERT INTO document_shares
+            (document_id, user_id, access_level, granted_by)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(document_id, user_id) DO UPDATE SET
+            access_level = excluded.access_level,
+            granted_by = excluded.granted_by,
+            granted_at = CURRENT_TIMESTAMP
+        `).run(
+          documentId,
+          recipient.id,
+          accessLevel,
+          req.currentUser.id
+        );
+
+        db.prepare(`
+          INSERT INTO audit_logs
+            (actor_user_id, action, document_id, target_user_id, details)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(
+          req.currentUser.id,
+          "document_shared",
+          documentId,
+          recipient.id,
+          "Granted " + accessLevel + " access"
+        );
+      })();
+
+      return res.json({
+        message: "Document shared successfully.",
+        documentId,
+        recipient: recipient.email,
+        accessLevel
+      });
+    } catch (error) {
+      console.error("Document sharing failed:", error);
+      return res.status(500).json({
+        message: "Could not share the document."
+      });
+    }
+  }
+);
+
+/* Revoke a user's access to a shared document. */
+app.delete(
+  "/api/documents/:id/shares/:userId",
+  requireRole("admin", "owner"),
+  (req, res) => {
+    try {
+      const documentId = Number(req.params.id);
+      const targetUserId = Number(req.params.userId);
+
+      if (
+        !Number.isSafeInteger(documentId) || documentId < 1 ||
+        !Number.isSafeInteger(targetUserId) || targetUserId < 1
+      ) {
+        return res.status(400).json({
+          message: "Invalid document or user ID."
+        });
+      }
+
+      const document = db.prepare(
+        "SELECT id, owner_id FROM documents WHERE id = ?"
+      ).get(documentId);
+
+      if (!document) {
+        return res.status(404).json({ message: "Document not found." });
+      }
+
+      if (
+        req.currentUser.role !== "admin" &&
+        document.owner_id !== req.currentUser.id
+      ) {
+        return res.status(403).json({
+          message: "Only the document owner or an admin can revoke access."
+        });
+      }
+
+      const revokeShare = db.transaction(() => {
+        const result = db.prepare(`
+          DELETE FROM document_shares
+          WHERE document_id = ? AND user_id = ?
+        `).run(documentId, targetUserId);
+
+        if (result.changes === 0) {
+          return false;
+        }
+
+        db.prepare(`
+          INSERT INTO audit_logs
+            (actor_user_id, action, document_id, target_user_id, details)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(
+          req.currentUser.id,
+          "document_access_revoked",
+          documentId,
+          targetUserId,
+          "Revoked shared access"
+        );
+
+        return true;
+      });
+
+      if (!revokeShare()) {
+        return res.status(404).json({
+          message: "No matching share was found."
+        });
+      }
+
+      return res.json({ message: "Document access revoked successfully." });
+    } catch (error) {
+      console.error("Access revocation failed:", error);
+      return res.status(500).json({
+        message: "Could not revoke document access."
+      });
+    }
+  }
+);
+// Admin-only endpoint to view recent audit events.
+app.get("/api/admin/audit-logs", requireRole("admin"), (req, res) => {
+  try {
+    const logs = db.prepare(`
+      SELECT
+        a.id,
+        a.action,
+        a.document_id,
+        a.details,
+        a.created_at,
+        actor.email AS actor_email,
+        target.email AS target_email
+      FROM audit_logs a
+      LEFT JOIN users actor ON actor.id = a.actor_user_id
+      LEFT JOIN users target ON target.id = a.target_user_id
+      ORDER BY a.id DESC
+      LIMIT 100
+    `).all();
+
+    res.json({ logs });
+  } catch (error) {
+    console.error("Could not load audit logs:", error);
+    res.status(500).json({
+      message: "Could not load activity logs."
+    });
+  }
+});
+// Delete a document owned by the user or accessible to an admin.
+app.delete(
+  "/api/documents/:id",
+  requireRole("admin", "owner"),
+  (req, res) => {
+    try {
+      const documentId = Number(req.params.id);
+
+      if (!Number.isSafeInteger(documentId) || documentId < 1) {
+        return res.status(400).json({
+          message: "Invalid document ID."
+        });
+      }
+
+      const document = db.prepare(`
+        SELECT id, owner_id, original_name, stored_name
+        FROM documents
+        WHERE id = ?
+      `).get(documentId);
+
+      if (!document) {
+        return res.status(404).json({
+          message: "Document not found."
+        });
+      }
+
+      if (
+        req.currentUser.role !== "admin" &&
+        document.owner_id !== req.currentUser.id
+      ) {
+        return res.status(403).json({
+          message: "Only the document owner or an admin can delete it."
+        });
+      }
+
+      const storedName = document.stored_name;
+
+      if (path.basename(storedName) !== storedName) {
+        return res.status(400).json({
+          message: "Invalid stored filename."
+        });
+      }
+
+      const filePath = path.join(uploadDir, storedName);
+      const temporaryPath = path.join(
+        uploadDir,
+        ".deleting-" + crypto.randomUUID()
+      );
+
+      // Temporarily move the file so a database failure can be rolled back.
+      let fileMoved = false;
+
+      if (fs.existsSync(filePath)) {
+        fs.renameSync(filePath, temporaryPath);
+        fileMoved = true;
+      }
+
+      try {
+        db.transaction(() => {
+          db.prepare("DELETE FROM documents WHERE id = ?")
+            .run(documentId);
+
+          db.prepare(`
+            INSERT INTO audit_logs
+              (actor_user_id, action, details)
+            VALUES (?, ?, ?)
+          `).run(
+            req.currentUser.id,
+            "document_deleted",
+            `Deleted document ${documentId}: ${document.original_name}`
+          );
+        })();
+      } catch (error) {
+        if (fileMoved && fs.existsSync(temporaryPath)) {
+          fs.renameSync(temporaryPath, filePath);
+        }
+        throw error;
+      }
+
+      if (fileMoved) {
+        try {
+          fs.unlinkSync(temporaryPath);
+        } catch (error) {
+          console.error("Could not remove deleted file:", error);
+        }
+      }
+
+      return res.json({
+        message: "Document deleted successfully."
+      });
+    } catch (error) {
+      console.error("Document deletion failed:", error);
+
+      if (!res.headersSent) {
+        return res.status(500).json({
+          message: "Could not delete the document."
+        });
+      }
+    }
+  }
+);
+
 app.post("/api/signup", async (req, res) => {
   try {
          const email = String(req.body.email || "").trim().toLowerCase();
