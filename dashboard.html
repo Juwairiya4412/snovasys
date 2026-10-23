@@ -317,7 +317,101 @@ document.getElementById("refreshDocuments").addEventListener(
 );
 
 
+document.getElementById("revokeForm").addEventListener("submit", async (event) => {
+
 document.getElementById("shareForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  const status = document.getElementById("shareStatus");
+  const documentId = document.getElementById("shareDocId").value;
+  const email = document.getElementById("shareEmail").value;
+  const accessLevel = document.getElementById("shareAccess").value;
+
+  status.textContent = "Sharing document...";
+
+  try {
+    const response = await fetch(`/api/documents/${documentId}/shares`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, accessLevel })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message || "Could not share document.");
+    }
+
+    status.textContent =
+      `Shared with ${data.recipient} (${data.accessLevel} access).`;
+
+    document.getElementById("shareForm").reset();
+    await loadDocuments();
+  } catch (error) {
+    status.textContent = error.message || "Could not share document.";
+  }
+});
+
+async function loadAuditLogs() {
+  const list = document.getElementById("auditLogsList");
+  const status = document.getElementById("auditLogsStatus");
+
+  list.replaceChildren();
+  status.textContent = "Loading activity logs...";
+
+  try {
+    const response = await fetch("/api/admin/audit-logs", {
+      credentials: "same-origin"
+    });
+
+    const data = await response.json();
+
+    if (response.status === 403) {
+      throw new Error("Activity logs are available to admins only.");
+    }
+
+    if (!response.ok) {
+      throw new Error(data.message || "Could not load activity logs.");
+    }
+
+    list.replaceChildren();
+
+    if (!Array.isArray(data.logs) || data.logs.length === 0) {
+      const item = document.createElement("li");
+      item.textContent = "No activity recorded yet.";
+      list.appendChild(item);
+    } else {
+      for (const log of data.logs) {
+        const item = document.createElement("li");
+        const actor = log.actor_email || "Unknown user";
+        const documentText = log.document_id == null
+          ? ""
+          : ` — Document ${log.document_id}`;
+        const target = log.target_email
+          ? ` — Recipient: ${log.target_email}`
+          : "";
+        item.textContent =
+          `${log.created_at || ""} — ${actor}: ${log.action}` +
+          documentText + target;
+        list.appendChild(item);
+      }
+    }
+
+    status.textContent = `Loaded ${data.logs.length} activity event(s).`;
+  } catch (error) {
+    list.replaceChildren();
+    status.textContent = error.message || "Could not load activity logs.";
+  }
+}
+
+document.getElementById("refreshAuditLogs").addEventListener(
+  "click",
+  loadAuditLogs
+);
+
+loadAuditLogs();
+
   event.preventDefault();
 
   const status = document.getElementById("shareStatus");
