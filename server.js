@@ -7,7 +7,24 @@ const fs = require("fs");
 const crypto = require("crypto");
 const multer = require("multer");
 const app = express();
-const db = new Database("trustvault.db");
+// Use a persistent volume in hosting, while preserving local development paths.
+const dataDir = process.env.TRUSTVAULT_DATA_DIR || null;
+
+if (dataDir) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+
+const dbPath = dataDir
+  ? path.join(dataDir, "trustvault.db")
+  : path.join(__dirname, "trustvault.db");
+
+const db = new Database(dbPath);
+
+const uploadDir = dataDir
+  ? path.join(dataDir, "uploads")
+  : path.resolve(__dirname, "..", "trustvault-private-uploads");
+
+fs.mkdirSync(uploadDir, { recursive: true });
 // Store uploads outside the public website folder.
 const uploadDir = path.resolve(
   __dirname,
