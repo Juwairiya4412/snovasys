@@ -155,11 +155,15 @@ async function loadAccount() {
   const status = document.getElementById("status");
 
   try {
-    const response = await fetch("/api/me", { credentials: "same-origin" });
+    const response = await fetch("/api/me", {
+      credentials: "same-origin"
+    });
+
     if (!response.ok) {
       window.location.href = "/";
       return;
     }
+
     const data = await response.json();
     account.textContent = "Signed in as: " + data.email;
     status.textContent = "Dashboard loaded successfully.";
@@ -174,19 +178,22 @@ document.getElementById("logoutButton").addEventListener("click", async () => {
       method: "POST",
       credentials: "same-origin"
     });
+
     if (response.ok) {
       window.location.href = "/";
     } else {
       document.getElementById("status").textContent = "Logout failed.";
     }
   } catch {
-    document.getElementById("status").textContent = "Could not connect to the server.";
+    document.getElementById("status").textContent =
+      "Could not connect to the server.";
   }
 });
 
 async function loadDocuments() {
   const list = document.getElementById("documentsList");
   const status = document.getElementById("documentsStatus");
+
   list.replaceChildren();
   status.textContent = "Loading documents...";
 
@@ -195,7 +202,10 @@ async function loadDocuments() {
       credentials: "same-origin"
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.message || "Could not load documents.");
+
+    if (!response.ok) {
+      throw new Error(data.message || "Could not load documents.");
+    }
 
     if (!Array.isArray(data.documents) || data.documents.length === 0) {
       const item = document.createElement("li");
@@ -205,6 +215,7 @@ async function loadDocuments() {
       for (const doc of data.documents) {
         const item = document.createElement("li");
         const details = document.createElement("span");
+
         details.textContent =
           `${doc.name} - ${doc.access_level} - ${doc.size_bytes} bytes `;
 
@@ -221,25 +232,33 @@ async function loadDocuments() {
 
           button.addEventListener("click", async () => {
             if (!window.confirm(`Delete "${doc.name}" permanently?`)) return;
+
             try {
               const result = await fetch(`/api/documents/${doc.id}`, {
                 method: "DELETE",
                 credentials: "same-origin"
               });
               const body = await result.json();
-              if (!result.ok) throw new Error(body.message || "Delete failed.");
+
+              if (!result.ok) {
+                throw new Error(body.message || "Delete failed.");
+              }
+
               await loadDocuments();
               status.textContent = body.message || "Document deleted.";
             } catch (error) {
-              status.textContent = error.message || "Could not delete document.";
+              status.textContent =
+                error.message || "Could not delete the document.";
             }
           });
 
           item.appendChild(button);
         }
+
         list.appendChild(item);
       }
     }
+
     status.textContent = "Document list updated.";
   } catch (error) {
     list.replaceChildren();
@@ -247,13 +266,18 @@ async function loadDocuments() {
   }
 }
 
-document.getElementById("refreshDocuments").addEventListener("click", loadDocuments);
+document.getElementById("refreshDocuments").addEventListener(
+  "click",
+  loadDocuments
+);
 
 document.getElementById("uploadForm").addEventListener("submit", async (event) => {
   event.preventDefault();
+
   const form = event.currentTarget;
   const file = document.getElementById("document").files[0];
   const status = document.getElementById("uploadStatus");
+
   if (!file) {
     status.textContent = "Please choose a document first.";
     return;
@@ -270,7 +294,11 @@ document.getElementById("uploadForm").addEventListener("submit", async (event) =
       body: formData
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.message || "Upload failed.");
+
+    if (!response.ok) {
+      throw new Error(data.message || "Upload failed.");
+    }
+
     form.reset();
     status.textContent = "Uploaded successfully: " + file.name;
     await loadDocuments();
@@ -281,6 +309,7 @@ document.getElementById("uploadForm").addEventListener("submit", async (event) =
 
 document.getElementById("shareForm").addEventListener("submit", async (event) => {
   event.preventDefault();
+
   const status = document.getElementById("shareStatus");
   const documentId = document.getElementById("shareDocId").value;
   const email = document.getElementById("shareEmail").value;
@@ -294,8 +323,13 @@ document.getElementById("shareForm").addEventListener("submit", async (event) =>
       body: JSON.stringify({ email, accessLevel })
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.message || "Could not share document.");
-    status.textContent = `Shared with ${data.recipient} (${data.accessLevel} access).`;
+
+    if (!response.ok) {
+      throw new Error(data.message || "Could not share document.");
+    }
+
+    status.textContent =
+      `Shared with ${data.recipient} (${data.accessLevel} access).`;
     event.currentTarget.reset();
     await loadDocuments();
   } catch (error) {
@@ -305,6 +339,7 @@ document.getElementById("shareForm").addEventListener("submit", async (event) =>
 
 document.getElementById("revokeForm").addEventListener("submit", async (event) => {
   event.preventDefault();
+
   const status = document.getElementById("revokeStatus");
   const documentId = document.getElementById("revokeDocId").value;
   const userId = document.getElementById("revokeUserId").value;
@@ -315,7 +350,11 @@ document.getElementById("revokeForm").addEventListener("submit", async (event) =
       credentials: "same-origin"
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.message || "Could not revoke access.");
+
+    if (!response.ok) {
+      throw new Error(data.message || "Could not revoke access.");
+    }
+
     status.textContent = data.message;
     event.currentTarget.reset();
     await loadDocuments();
@@ -327,6 +366,7 @@ document.getElementById("revokeForm").addEventListener("submit", async (event) =
 async function loadAuditLogs() {
   const list = document.getElementById("auditLogsList");
   const status = document.getElementById("auditLogsStatus");
+
   list.replaceChildren();
   status.textContent = "Loading activity logs...";
 
@@ -339,11 +379,15 @@ async function loadAuditLogs() {
     if (response.status === 403) {
       throw new Error(data.message || "Activity logs are available to admins only.");
     }
+
     if (response.status === 401) {
       window.location.href = "/";
       return;
     }
-    if (!response.ok) throw new Error(data.message || "Could not load activity logs.");
+
+    if (!response.ok) {
+      throw new Error(data.message || "Could not load activity logs.");
+    }
 
     if (!Array.isArray(data.logs) || data.logs.length === 0) {
       const item = document.createElement("li");
@@ -352,14 +396,21 @@ async function loadAuditLogs() {
     } else {
       for (const log of data.logs) {
         const item = document.createElement("li");
-        const doc = log.document_id == null ? "" : ` - Document ${log.document_id}`;
-        const target = log.target_email ? ` - Recipient: ${log.target_email}` : "";
+        const doc = log.document_id == null
+          ? ""
+          : ` - Document ${log.document_id}`;
+        const target = log.target_email
+          ? ` - Recipient: ${log.target_email}`
+          : "";
+
         item.textContent =
           `${log.created_at || ""} - ${log.actor_email || "Unknown user"}: ${log.action}` +
           doc + target;
+
         list.appendChild(item);
       }
     }
+
     status.textContent = `Loaded ${data.logs.length} activity event(s).`;
   } catch (error) {
     list.replaceChildren();
@@ -367,29 +418,18 @@ async function loadAuditLogs() {
   }
 }
 
-document.getElementById("refreshAuditLogs").addEventListener("click", loadAuditLogs);
+document.getElementById("refreshAuditLogs").addEventListener(
+  "click",
+  loadAuditLogs
+);
 
 loadAccount();
 loadDocuments();
 loadAuditLogs();
 </script>
-$html = Get-Content .\dashboard.html -Raw
-$match = [regex]::Match($html, '(?s)<script>(.*?)</script>')
-
-if (-not $match.Success) {
-    throw "Could not find the dashboard script."
-}
-
-Set-Content .\dashboard-check.js $match.Groups[1].Value -Encoding utf8
-node --check .\dashboard-check.js
-
-if ($LASTEXITCODE -ne 0) {
-    throw "JavaScript syntax check failed. Do not commit yet."
-}
-
-Remove-Item .\dashboard-check.js
-Write-Host "Dashboard JavaScript syntax check passed."
 </body>
 </html>
+
+
 
 
