@@ -26,13 +26,7 @@ const uploadDir = dataDir
 
 fs.mkdirSync(uploadDir, { recursive: true });
 // Store uploads outside the public website folder.
-const uploadDir = path.resolve(
-  __dirname,
-  "..",
-  "trustvault-private-uploads"
-);
 
-fs.mkdirSync(uploadDir, { recursive: true });
 
 const allowedTypes = {
   ".pdf": "application/pdf",
