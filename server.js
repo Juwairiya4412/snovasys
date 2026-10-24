@@ -134,7 +134,46 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_audit_logs_created
     ON audit_logs(created_at);
 `);
+// Create or promote the configured hosting admin account.
+const bootstrapAdminEmail = String(
+  process.env.BOOTSTRAP_ADMIN_EMAIL || ""
+).trim().toLowerCase();
+
+const bootstrapAdminPassword = String(
+  process.env.BOOTSTRAP_ADMIN_PASSWORD || ""
+);
+
+if (bootstrapAdminEmail && bootstrapAdminPassword) {
+  const existingAdmin = db.prepare(
+    "SELECT id FROM users WHERE email = ?"
+  ).get(bootstrapAdminEmail);
+
+  if (existingAdmin) {
+    db.prepare(
+      "UPDATE users SET role = 'admin' WHERE id = ?"
+    ).run(existingAdmin.id);
+  } else {
+    if (bootstrapAdminPassword.length < 12 ||
+        bootstrapAdminPassword.length > 72) {
+      throw new Error("Hosting admin password must be 12–72 characters.");
+    }
+
+    db.prepare(`
+      INSERT INTO users (email, password_hash, role)
+      VALUES (?, ?, 'admin')
+    `).run(
+      bootstrapAdminEmail,
+      bcrypt.hashSync(bootstrapAdminPassword, 12)
+    );
+  }
+}
 // Session middleware — must come before routes that use req.session.
+if (process.env.NODE_ENV === "production") {
+  if (!process.env.SESSION_SECRET) {
+    throw new Error("SESSION_SECRET must be configured in production.");
+  }
+  app.set("trust proxy", 1);
+}
 app.use(session({
   name: "trustvault.sid",
   secret: process.env.SESSION_SECRET || "dev-only-change-this-secret",
